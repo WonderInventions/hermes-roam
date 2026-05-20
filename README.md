@@ -34,18 +34,22 @@ To cut a release:
 1. Bump the version in three places to the same string:
    - `pyproject.toml` → `project.version`
    - `roam/plugin.yaml` → `version`
-   - `INSTALL.md` → the example `v…` references and wheel filename
+   - `INSTALL.md` → the `v…` references in the install one-liner and
+     wheel filename
 2. Commit the bump on `master` and push.
 3. Tag and push:
    ```sh
-   git tag v0.0.1
-   git push origin v0.0.1
+   git tag v0.0.2
+   git push origin v0.0.2
    ```
 4. The `Release` GitHub Actions workflow fires on `v*` tag push and:
    - checks that the tag matches `pyproject.toml`'s `version`,
    - runs `pytest`,
    - builds the sdist + wheel with `python -m build`,
-   - creates a GitHub Release with the artifacts attached and
+   - builds `hermes-roam-plugin-v<version>.tar.gz` (the plugin
+     tarball that the INSTALL.md one-liner extracts into
+     `~/.hermes/plugins/`),
+   - creates a GitHub Release with all three artifacts attached and
      auto-generated notes.
 
 If the tag/version check fails the workflow aborts before publishing,

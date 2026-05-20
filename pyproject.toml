@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "hermes-roam"
-version = "0.0.1"
+version = "0.0.2"
 description = "Roam (ro.am) platform adapter plugin for Hermes Agent"
 requires-python = ">=3.10"
 license = { text = "MIT" }
@@ -30,7 +30,10 @@ Homepage = "https://github.com/WonderInventions/hermes-roam"
 Issues = "https://github.com/WonderInventions/hermes-roam/issues"
 
 [project.entry-points."hermes_agent.plugins"]
-roam = "roam:register"
+# Point at the module, not the function — Hermes' loader does
+# getattr(module, "register"), so 'roam:register' would resolve to the
+# function and the lookup would fail.
+roam = "roam"
 
 [tool.setuptools]
 packages = ["roam"]

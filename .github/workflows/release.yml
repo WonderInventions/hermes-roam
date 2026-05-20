@@ -44,6 +44,15 @@ jobs:
       - name: Build sdist and wheel
         run: python -m build
 
+      - name: Build plugin tarball
+        # Tarball extracts to ~/.hermes/plugins/roam/, matching Hermes'
+        # user-plugin discovery layout. The one-liner in INSTALL.md uses this.
+        # Placed outside dist/ so it doesn't collide with the sdist glob.
+        run: |
+          tar -czf "hermes-roam-plugin-${GITHUB_REF_NAME}.tar.gz" \
+            --exclude='__pycache__' \
+            roam
+
       - name: Create GitHub Release with artifacts
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -51,4 +60,5 @@ jobs:
           gh release create "$GITHUB_REF_NAME" \
             --title "$GITHUB_REF_NAME" \
             --generate-notes \
+            "hermes-roam-plugin-${GITHUB_REF_NAME}.tar.gz" \
             dist/*.whl dist/*.tar.gz
