@@ -1,0 +1,72 @@
+name: roam-platform
+label: Roam
+kind: platform
+version: 0.0.1
+description: >
+  Roam (ro.am) gateway adapter for Hermes Agent.
+  Runs an aiohttp webhook server that accepts Roam chat.message webhooks
+  (Standard-Webhooks signature-verified) and relays messages to/from the
+  Hermes agent. Outbound replies use the Roam V1 API (chat.post, chat.update,
+  chat.typing). Threads are mapped to Hermes session threads via Roam's
+  threadTimestamp. Native streaming (chat.startStream / appendStream /
+  stopStream) is supported when enabled.
+author: Hermes Agent contributors
+requires_env:
+  - name: ROAM_API_KEY
+    description: "Roam API key (Bearer token). Create in Roam Administration > Developer."
+    prompt: "Roam API key"
+    url: "https://ro.am/"
+    password: true
+  - name: ROAM_WEBHOOK_SECRET
+    description: "Standard-Webhooks signing secret for verifying inbound payloads (whsec_... prefix or raw base64)."
+    prompt: "Roam webhook signing secret"
+    password: true
+optional_env:
+  - name: ROAM_API_BASE_URL
+    description: "Override Roam API base URL (default: https://api.ro.am/v1)."
+    prompt: "Roam API base URL"
+    password: false
+  - name: ROAM_WEBHOOK_HOST
+    description: "Webhook bind host (default: 0.0.0.0)."
+    prompt: "Webhook host"
+    password: false
+  - name: ROAM_WEBHOOK_PORT
+    description: "Webhook listen port (default: 8647)."
+    prompt: "Webhook port"
+    password: false
+  - name: ROAM_WEBHOOK_PATH
+    description: "Webhook endpoint path (default: /roam/webhook)."
+    prompt: "Webhook path"
+    password: false
+  - name: ROAM_WEBHOOK_PUBLIC_URL
+    description: "Public HTTPS base URL where Roam can reach the webhook (e.g. https://my-tunnel.example.com)."
+    prompt: "Public HTTPS base URL"
+    password: false
+  - name: ROAM_ALLOWED_USERS
+    description: "Comma-separated Roam user UUIDs allowed to DM the bot."
+    prompt: "Allowed user UUIDs (comma-separated)"
+    password: false
+  - name: ROAM_ALLOWED_GROUPS
+    description: "Comma-separated Roam group/chat UUIDs the bot will respond in."
+    prompt: "Allowed group UUIDs (comma-separated)"
+    password: false
+  - name: ROAM_ALLOW_ALL_USERS
+    description: "Allow any Roam user to talk to the bot (dev only — disables allowlist)."
+    prompt: "Allow all users? (true/false)"
+    password: false
+  - name: ROAM_HOME_CHANNEL
+    description: "Default chat UUID for cron / notification delivery."
+    prompt: "Home channel UUID (or empty)"
+    password: false
+  - name: ROAM_REQUIRE_MENTION
+    description: "In group chats, only respond when the bot is mentioned (default: true)."
+    prompt: "Require mention in groups? (true/false)"
+    password: false
+  - name: ROAM_NATIVE_STREAMING
+    description: "Use Roam native streaming (chat.startStream/appendStream/stopStream) instead of post-then-edit."
+    prompt: "Use native streaming? (true/false)"
+    password: false
+  - name: ROAM_SENDER_ID
+    description: "Optional bot persona code (sender.id) for chat.post. Defaults to the integration's default persona."
+    prompt: "Sender persona code"
+    password: false

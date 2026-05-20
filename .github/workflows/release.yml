@@ -1,0 +1,54 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write  # needed to create the GitHub Release
+
+jobs:
+  release:
+    name: Build and publish GitHub Release
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install build + test deps
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install build
+          python -m pip install -e ".[dev]"
+
+      - name: Verify tag matches pyproject version
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          pkg=$(python -c "import tomllib,sys; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
+          if [ "$tag" != "$pkg" ]; then
+            echo "Tag $GITHUB_REF_NAME (=$tag) does not match pyproject version $pkg" >&2
+            exit 1
+          fi
+
+      - name: Run tests against the tagged commit
+        run: python -m pytest -v
+
+      - name: Build sdist and wheel
+        run: python -m build
+
+      - name: Create GitHub Release with artifacts
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --title "$GITHUB_REF_NAME" \
+            --generate-notes \
+            dist/*.whl dist/*.tar.gz
