@@ -13,9 +13,11 @@ import pytest
 from roam.adapter import (
     RoamAdapter,
     _Deduplicator,
+    _reply_ts_from_metadata,
     _strip_bot_mention,
     _thread_ts_from_metadata,
     _was_bot_mentioned,
+    expand_soft_breaks,
 )
 from roam.roam_client import RoamAPIError
 from roam.standard_webhooks import verify_signature
@@ -175,6 +177,54 @@ def test_thread_ts_from_metadata_returns_none_on_empty():
 
 
 # ---------------------------------------------------------------------------
+# reply_to metadata helper
+# ---------------------------------------------------------------------------
+
+def test_reply_ts_from_metadata_reads_explicit_keys():
+    assert _reply_ts_from_metadata({"reply_to_timestamp": 100}) == 100
+    assert _reply_ts_from_metadata({"replyToTimestamp": "200"}) == 200
+    assert _reply_ts_from_metadata({"replyTimestamp": 300}) == 300
+
+
+def test_reply_ts_from_metadata_returns_none_when_absent():
+    assert _reply_ts_from_metadata(None) is None
+    assert _reply_ts_from_metadata({}) is None
+    assert _reply_ts_from_metadata({"unrelated": 5}) is None
+
+
+# ---------------------------------------------------------------------------
+# expand_soft_breaks
+# ---------------------------------------------------------------------------
+
+def test_expand_soft_breaks_inserts_blank_between_lines():
+    assert expand_soft_breaks("a\nb\nc") == "a\n\nb\n\nc"
+
+
+def test_expand_soft_breaks_preserves_existing_paragraphs():
+    assert expand_soft_breaks("a\n\nb") == "a\n\nb"
+
+
+def test_expand_soft_breaks_preserves_fenced_code_block():
+    src = "Run this:\n```sh\nls -la\necho hi\n```\nDone."
+    out = expand_soft_breaks(src)
+    # Lines inside the fence are unmodified.
+    assert "```sh\nls -la\necho hi\n```" in out
+    # The non-code line before the fence gets paragraph-separated.
+    assert out.startswith("Run this:\n\n```sh")
+
+
+def test_expand_soft_breaks_handles_tilde_fences():
+    src = "before\n~~~\ncode line\n~~~\nafter"
+    out = expand_soft_breaks(src)
+    assert "~~~\ncode line\n~~~" in out
+
+
+def test_expand_soft_breaks_is_idempotent_on_empty():
+    assert expand_soft_breaks("") == ""
+    assert expand_soft_breaks("single line") == "single line"
+
+
+# ---------------------------------------------------------------------------
 # Adapter fixture + fake RoamClient
 # ---------------------------------------------------------------------------
 
@@ -278,10 +328,42 @@ async def test_send_routes_thread_id_from_metadata():
 
 
 @pytest.mark.asyncio
-async def test_send_passes_reply_to_as_int():
+async def test_send_ignores_gateway_reply_to():
+    """The gateway always passes the inbound message as reply_to. We drop it
+    so Roam doesn't render a quote block on every turn-based response.
+    """
     adapter, fake = _make_adapter()
     await adapter.send("chat-1", "hi", reply_to="1700000000000123")
-    assert fake.posts[0]["reply_to"] == 1700000000000123
+    assert fake.posts[0]["reply_to"] is None
+
+
+@pytest.mark.asyncio
+async def test_send_honors_explicit_reply_to_metadata():
+    """An explicit reply_to_timestamp in metadata DOES set replyTo —
+    that's the escape hatch for referencing an older message.
+    """
+    adapter, fake = _make_adapter()
+    await adapter.send(
+        "chat-1",
+        "hi",
+        reply_to="1700000000000123",
+        metadata={"reply_to_timestamp": 1699999999000000},
+    )
+    assert fake.posts[0]["reply_to"] == 1699999999000000
+
+
+@pytest.mark.asyncio
+async def test_send_expands_soft_breaks_in_outgoing_text():
+    adapter, fake = _make_adapter()
+    await adapter.send("chat-1", "line one\nline two\nline three")
+    assert fake.posts[0]["text"] == "line one\n\nline two\n\nline three"
+
+
+@pytest.mark.asyncio
+async def test_edit_message_expands_soft_breaks():
+    adapter, fake = _make_adapter()
+    await adapter.edit_message("chat-1", "1700000000000000", "a\nb")
+    assert fake.updates[0]["text"] == "a\n\nb"
 
 
 @pytest.mark.asyncio

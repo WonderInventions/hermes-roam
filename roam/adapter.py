@@ -87,6 +87,38 @@ DEDUPE_MAX_ENTRIES = 2000
 # Bot mention pattern used by Roam clients: <@uuid> or <!@uuid>.
 _BOT_MENTION_RE = re.compile(r"<!?@([0-9a-f-]+)>", re.IGNORECASE)
 
+# Fenced code-block delimiter — ``` or ~~~ with up to 3 leading spaces, per
+# the CommonMark spec.
+_FENCE_RE = re.compile(r"^\s{0,3}(```|~~~)")
+
+
+def expand_soft_breaks(text: str) -> str:
+    """Insert blank lines between non-empty consecutive lines outside code fences.
+
+    Roam's Markdown renderer is CommonMark-strict, so a single newline
+    between two non-empty lines is a soft break that collapses to a space
+    at render time. The agent emits multi-line content (help tables,
+    bulleted lists, paragraphs) with single newlines and expects each
+    line to render on its own — so we forcibly upgrade single newlines
+    to paragraph breaks. Fenced code blocks are passed through unchanged
+    so command snippets render correctly.
+    """
+    if not text:
+        return text
+    lines = text.split("\n")
+    out: List[str] = []
+    in_fence = False
+    for i, line in enumerate(lines):
+        out.append(line)
+        if _FENCE_RE.match(line):
+            in_fence = not in_fence
+            continue
+        if i + 1 >= len(lines) or in_fence:
+            continue
+        if line.strip() and lines[i + 1].strip():
+            out.append("")
+    return "\n".join(out)
+
 
 # ---------------------------------------------------------------------------
 # Configuration helpers
@@ -579,18 +611,18 @@ class RoamAdapter(BasePlatformAdapter):
         if not self._client:
             return SendResult(success=False, error="Roam adapter not connected")
 
+        # Turn-based chat already implies "this is a reply to the previous
+        # turn", and Roam renders replyTimestamp as a visible quote block
+        # in the message. We intentionally drop the gateway's auto-supplied
+        # reply_to — only an explicit metadata override (referencing an
+        # older, non-most-recent message) sets it.
         thread_ts = _thread_ts_from_metadata(metadata)
-        reply_ts: Optional[int] = None
-        if reply_to:
-            try:
-                reply_ts = int(reply_to)
-            except (TypeError, ValueError):
-                reply_ts = None
+        reply_ts: Optional[int] = _reply_ts_from_metadata(metadata)
 
         try:
             data = await self._client.chat_post(
                 chat_id=chat_id,
-                text=content,
+                text=expand_soft_breaks(content),
                 thread_timestamp=thread_ts,
                 reply_to=reply_ts,
             )
@@ -630,7 +662,7 @@ class RoamAdapter(BasePlatformAdapter):
             data = await self._client.chat_update(
                 chat_id=chat_id,
                 timestamp=timestamp,
-                text=content,
+                text=expand_soft_breaks(content),
             )
         except RoamAPIError as exc:
             return SendResult(
@@ -708,6 +740,28 @@ def _thread_ts_from_metadata(metadata: Optional[Dict[str, Any]]) -> Optional[int
     if not metadata:
         return None
     for key in ("thread_timestamp", "threadTimestamp", "thread_id", "threadId"):
+        value = metadata.get(key)
+        if value is None or value == "":
+            continue
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
+def _reply_ts_from_metadata(metadata: Optional[Dict[str, Any]]) -> Optional[int]:
+    """Extract a Roam ``replyTimestamp`` (int microseconds) from metadata.
+
+    Only honored when the caller explicitly opts in — the gateway's
+    routine ``reply_to`` (which always points at the previous inbound) is
+    intentionally ignored, since Roam already renders turn-based replies
+    implicitly. An explicit ``reply_to_timestamp`` metadata key is the
+    escape hatch for referencing an older message.
+    """
+    if not metadata:
+        return None
+    for key in ("reply_to_timestamp", "replyToTimestamp", "replyTimestamp"):
         value = metadata.get(key)
         if value is None or value == "":
             continue
