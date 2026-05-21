@@ -277,6 +277,11 @@ class RoamAdapter(BasePlatformAdapter):
         self._site = None  # aiohttp.web.TCPSite
         self._bot_user_id: Optional[str] = None
         self._bot_name: Optional[str] = None
+        # For PATs: the human owner's identity, surfaced as user_name on
+        # inbound messages so the agent refers to them by name.
+        self._owner_id: Optional[str] = None
+        self._owner_name: Optional[str] = None
+        self._owner_email: Optional[str] = None
         self._dedup_webhook_id = _Deduplicator()
         self._dedup_message = _Deduplicator()
         self._lock_key: Optional[str] = None
@@ -316,15 +321,19 @@ class RoamAdapter(BasePlatformAdapter):
             default_sender_id=self.sender_id,
         )
 
-        # Best-effort: fetch our own bot identity for self-message filtering
-        # and mention detection. If the call fails (offline tests, transient
-        # 5xx) we fall back to not filtering self-events — Roam doesn't
-        # currently echo our own messages back, so the cost is minor.
+        # Best-effort: fetch identity info via token.info.
+        #
+        # For a personal access token (PAT), the response includes both:
+        #   user: the human owner ({id, name, email?, imageUrl?})
+        #   bot : the persona the API key posts as ({id, name, imageUrl?})
+        # For an org token, only ``user`` is set and it IS the bot.
+        #
+        # We use the bot id for self-echo filtering and mention detection,
+        # and the owner id/name/email to give the agent a real human
+        # identity when the PAT owner DMs the bot.
         try:
             info = await self._client.token_info()
-            bot = info.get("bot") or {}
-            self._bot_user_id = bot.get("id") or None
-            self._bot_name = bot.get("name") or None
+            self._apply_token_info(info)
         except Exception as exc:
             logger.debug("roam: token.info failed: %s", exc)
 
@@ -408,6 +417,43 @@ class RoamAdapter(BasePlatformAdapter):
             except Exception:
                 pass
             self._lock_key = None
+
+    def _apply_token_info(self, info: Dict[str, Any]) -> None:
+        """Populate bot + owner identity from a ``/v1/token.info`` response.
+
+        Shape (V1):
+            {
+              "user": {"id","name","email?","imageUrl?"},
+              "bot":  {"id","name","imageUrl?"},  # PAT only
+              "scopes": [...],
+              "roam":  {...}
+            }
+        """
+        user = info.get("user") or {}
+        bot = info.get("bot") or {}
+        if bot:
+            # Personal access token: the API key acts on behalf of a person.
+            self._bot_user_id = bot.get("id") or None
+            self._bot_name = bot.get("name") or None
+            self._owner_id = user.get("id") or None
+            self._owner_name = user.get("name") or None
+            self._owner_email = user.get("email") or None
+            logger.info(
+                "roam: PAT owner=%s (id=%s); bot persona=%s (id=%s)",
+                self._owner_name or "?", self._owner_id or "?",
+                self._bot_name or "?", self._bot_user_id or "?",
+            )
+        else:
+            # Org token: user IS the bot.
+            self._bot_user_id = user.get("id") or None
+            self._bot_name = user.get("name") or None
+            self._owner_id = None
+            self._owner_name = None
+            self._owner_email = None
+            logger.info(
+                "roam: org token; bot=%s (id=%s)",
+                self._bot_name or "?", self._bot_user_id or "?",
+            )
 
     # ------------------------------------------------------------------
     # Webhook handlers
@@ -510,11 +556,27 @@ class RoamAdapter(BasePlatformAdapter):
         # back to the same Roam-native thread.
         thread_id = str(thread_timestamp) if thread_timestamp else None
 
+        # Resolve a human-readable user_name when token.info told us who the
+        # PAT owner is. Without this the agent only sees a UUID and has no
+        # way to refer to the user by name. For non-owner senders (e.g.
+        # group chat participants) we don't have name info — fall back to
+        # the UUID.
+        is_owner = bool(self._owner_id and user_id == self._owner_id)
+        user_name = self._owner_name if (is_owner and self._owner_name) else user_id
+
+        # Inject owner email into the per-message channel context so the
+        # agent can address Rob by email when appropriate (e.g. drafting
+        # calendar invites). Only set when we actually have it AND the
+        # sender is the owner — we don't leak owner email to other senders.
+        channel_context = None
+        if is_owner and self._owner_email:
+            channel_context = f"Owner email: {self._owner_email}"
+
         source = self.build_source(
             chat_id=chat_id,
             chat_type=hermes_chat_type,
             user_id=user_id,
-            user_name=user_id,
+            user_name=user_name,
             chat_name=chat_id,
             thread_id=thread_id,
             message_id=message_id,
@@ -532,6 +594,7 @@ class RoamAdapter(BasePlatformAdapter):
             message_id=message_id,
             media_urls=media_urls,
             media_types=media_types,
+            channel_context=channel_context,
         )
 
         await self.handle_message(event_obj)

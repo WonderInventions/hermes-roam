@@ -288,6 +288,9 @@ def _make_adapter(
     allowed_groups: Optional[List[str]] = None,
     require_mention: bool = True,
     bot_user_id: Optional[str] = BOT_ID,
+    owner_id: Optional[str] = None,
+    owner_name: Optional[str] = None,
+    owner_email: Optional[str] = None,
 ) -> Tuple[RoamAdapter, _FakeRoamClient]:
     from gateway.config import PlatformConfig
 
@@ -303,6 +306,9 @@ def _make_adapter(
     fake = _FakeRoamClient()
     adapter._client = fake
     adapter._bot_user_id = bot_user_id
+    adapter._owner_id = owner_id
+    adapter._owner_name = owner_name
+    adapter._owner_email = owner_email
     return adapter, fake
 
 
@@ -510,6 +516,77 @@ async def test_inbound_drops_non_message_events():
     adapter, _ = _make_adapter(allow_all=True)
     await adapter._dispatch_event({"type": "chat.reaction", "chatId": "x"})
     assert adapter.handled_messages == []
+
+
+# ---------------------------------------------------------------------------
+# token.info → owner identity
+# ---------------------------------------------------------------------------
+
+def test_apply_token_info_pat_extracts_owner_and_bot():
+    adapter, _ = _make_adapter(bot_user_id=None)
+    adapter._apply_token_info({
+        "user": {"id": "owner-uuid", "name": "Rob", "email": "rob@ro.am"},
+        "bot": {"id": BOT_ID, "name": "Hermes"},
+        "scopes": ["chat:write", "user:read.email"],
+    })
+    assert adapter._bot_user_id == BOT_ID
+    assert adapter._bot_name == "Hermes"
+    assert adapter._owner_id == "owner-uuid"
+    assert adapter._owner_name == "Rob"
+    assert adapter._owner_email == "rob@ro.am"
+
+
+def test_apply_token_info_org_token_has_no_owner():
+    adapter, _ = _make_adapter(bot_user_id=None)
+    adapter._apply_token_info({
+        "user": {"id": BOT_ID, "name": "OrgBot"},
+        "scopes": ["chat:write"],
+    })
+    assert adapter._bot_user_id == BOT_ID
+    assert adapter._bot_name == "OrgBot"
+    assert adapter._owner_id is None
+    assert adapter._owner_name is None
+    assert adapter._owner_email is None
+
+
+def test_apply_token_info_pat_without_email_scope():
+    adapter, _ = _make_adapter(bot_user_id=None)
+    adapter._apply_token_info({
+        "user": {"id": "owner-uuid", "name": "Rob"},
+        "bot": {"id": BOT_ID, "name": "Hermes"},
+    })
+    assert adapter._owner_name == "Rob"
+    assert adapter._owner_email is None
+
+
+@pytest.mark.asyncio
+async def test_inbound_from_owner_uses_owner_name_and_email_context():
+    adapter, _ = _make_adapter(
+        allow_all=True,
+        owner_id="owner-uuid",
+        owner_name="Rob",
+        owner_email="rob@ro.am",
+    )
+    await adapter._dispatch_event(_msg_event(userId="owner-uuid"))
+    event = adapter.handled_messages[0]
+    assert event.source.user_name == "Rob"
+    assert event.source.user_id == "owner-uuid"
+    assert event.channel_context == "Owner email: rob@ro.am"
+
+
+@pytest.mark.asyncio
+async def test_inbound_from_non_owner_falls_back_to_uuid():
+    adapter, _ = _make_adapter(
+        allow_all=True,
+        owner_id="owner-uuid",
+        owner_name="Rob",
+        owner_email="rob@ro.am",
+    )
+    await adapter._dispatch_event(_msg_event(userId="stranger-uuid"))
+    event = adapter.handled_messages[0]
+    assert event.source.user_name == "stranger-uuid"
+    # Don't leak owner email to other senders.
+    assert event.channel_context is None
 
 
 # ---------------------------------------------------------------------------

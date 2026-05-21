@@ -9,14 +9,14 @@ steps: drop the plugin into that directory, then opt in via
 
 ```sh
 mkdir -p ~/.hermes/plugins && \
-  curl -sL https://github.com/WonderInventions/hermes-roam/releases/download/v0.0.3/hermes-roam-plugin-v0.0.3.tar.gz \
+  curl -sL https://github.com/WonderInventions/hermes-roam/releases/download/v0.0.4/hermes-roam-plugin-v0.0.4.tar.gz \
   | tar -xz -C ~/.hermes/plugins && \
   hermes plugins enable roam
 ```
 
-This downloads the plugin tarball attached to release `v0.0.3`,
+This downloads the plugin tarball attached to release `v0.0.4`,
 extracts it to `~/.hermes/plugins/roam/`, and enables it. Replace
-`v0.0.3` with whichever release tag you want from
+`v0.0.4` with whichever release tag you want from
 <https://github.com/WonderInventions/hermes-roam/releases>.
 
 ## Configure
@@ -41,7 +41,7 @@ required if you want the plugin to auto-subscribe webhooks),
 hermes plugins list | grep roam
 ```
 
-You should see `roam | enabled | 0.0.3 | Roam ... | user`. If it says
+You should see `roam | enabled | 0.0.4 | Roam ... | user`. If it says
 `not enabled`, re-run `hermes plugins enable roam`.
 
 Then start the gateway: `hermes gateway`. The Roam adapter will bind

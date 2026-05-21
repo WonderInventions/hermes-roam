@@ -112,6 +112,7 @@ class _MessageEvent:
     message_id: Optional[str] = None
     media_urls: List[str] = field(default_factory=list)
     media_types: List[str] = field(default_factory=list)
+    channel_context: Optional[str] = None
 
 
 @dataclass

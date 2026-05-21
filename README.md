@@ -39,8 +39,8 @@ To cut a release:
 2. Commit the bump on `master` and push.
 3. Tag and push:
    ```sh
-   git tag v0.0.3
-   git push origin v0.0.3
+   git tag v0.0.4
+   git push origin v0.0.4
    ```
 4. The `Release` GitHub Actions workflow fires on `v*` tag push and:
    - checks that the tag matches `pyproject.toml`'s `version`,
