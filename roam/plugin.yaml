@@ -1,7 +1,7 @@
 name: roam
 label: Roam
 kind: platform
-version: 0.0.6
+version: 0.0.7
 description: >
   Roam (ro.am) gateway adapter for Hermes Agent.
   Runs an aiohttp webhook server that accepts Roam chat.message webhooks
@@ -59,7 +59,7 @@ optional_env:
     prompt: "Home channel UUID (or empty)"
     password: false
   - name: ROAM_REQUIRE_MENTION
-    description: "In group chats, only respond when the bot is mentioned (default: true)."
+    description: "In group chats, only respond when the bot is mentioned (default: false — responds to every message)."
     prompt: "Require mention in groups? (true/false)"
     password: false
   - name: ROAM_NATIVE_STREAMING

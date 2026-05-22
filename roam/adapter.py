@@ -257,10 +257,13 @@ class RoamAdapter(BasePlatformAdapter):
             os.getenv("ROAM_ALLOWED_GROUPS", "")
         ) | set(extra.get("allowed_groups", []))
 
-        # Behavior
+        # Behavior. require_mention defaults to False — most setups
+        # (DMs, dedicated bot channels) want the bot to respond to every
+        # message. Turn it on with ROAM_REQUIRE_MENTION=true in busy
+        # channels where the bot should stay quiet unless addressed.
         self.require_mention: bool = _truthy_env(
             "ROAM_REQUIRE_MENTION",
-            bool(extra.get("require_mention", True)),
+            bool(extra.get("require_mention", False)),
         )
         self.native_streaming: bool = _truthy_env(
             "ROAM_NATIVE_STREAMING",
