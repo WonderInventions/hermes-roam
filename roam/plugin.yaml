@@ -1,7 +1,7 @@
 name: roam
 label: Roam
 kind: platform
-version: 0.0.4
+version: 0.0.5
 description: >
   Roam (ro.am) gateway adapter for Hermes Agent.
   Runs an aiohttp webhook server that accepts Roam chat.message webhooks
@@ -65,6 +65,10 @@ optional_env:
   - name: ROAM_NATIVE_STREAMING
     description: "Use Roam native streaming (chat.startStream/appendStream/stopStream) instead of post-then-edit."
     prompt: "Use native streaming? (true/false)"
+    password: false
+  - name: ROAM_REPLY_IN_THREAD
+    description: "Always reply in a thread anchored on the inbound post. Idiomatic for org bots that idle in busy channels (default: false)."
+    prompt: "Always reply in thread? (true/false)"
     password: false
   - name: ROAM_SENDER_ID
     description: "Optional bot persona code (sender.id) for chat.post. Defaults to the integration's default persona."

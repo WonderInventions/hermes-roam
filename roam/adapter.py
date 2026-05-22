@@ -266,6 +266,14 @@ class RoamAdapter(BasePlatformAdapter):
             "ROAM_NATIVE_STREAMING",
             bool(extra.get("native_streaming", False)),
         )
+        # When true, top-level inbound messages get a thread_id anchored
+        # on the inbound message's own timestamp, so the bot's reply
+        # creates a thread off the post rather than landing back in the
+        # main channel. Idiomatic for org bots that idle in busy channels.
+        self.reply_in_thread: bool = _truthy_env(
+            "ROAM_REPLY_IN_THREAD",
+            bool(extra.get("reply_in_thread", False)),
+        )
         self.sender_id: Optional[str] = (
             os.getenv("ROAM_SENDER_ID") or extra.get("sender_id") or None
         )
@@ -553,8 +561,16 @@ class RoamAdapter(BasePlatformAdapter):
             await self._collect_media(items, media_urls, media_types)
 
         # Map threadTimestamp to Hermes thread_id so outbound replies route
-        # back to the same Roam-native thread.
-        thread_id = str(thread_timestamp) if thread_timestamp else None
+        # back to the same Roam-native thread. When ROAM_REPLY_IN_THREAD is
+        # set and the inbound was top-level, anchor a new thread on the
+        # inbound message itself so the bot's reply doesn't pollute the
+        # main channel.
+        if thread_timestamp:
+            thread_id = str(thread_timestamp)
+        elif self.reply_in_thread:
+            thread_id = str(timestamp)
+        else:
+            thread_id = None
 
         # Resolve a human-readable user_name when token.info told us who the
         # PAT owner is. Without this the agent only sees a UUID and has no

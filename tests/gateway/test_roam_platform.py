@@ -287,6 +287,7 @@ def _make_adapter(
     allowed_users: Optional[List[str]] = None,
     allowed_groups: Optional[List[str]] = None,
     require_mention: bool = True,
+    reply_in_thread: bool = False,
     bot_user_id: Optional[str] = BOT_ID,
     owner_id: Optional[str] = None,
     owner_name: Optional[str] = None,
@@ -301,6 +302,7 @@ def _make_adapter(
         "allowed_users": allowed_users or [],
         "allowed_groups": allowed_groups or [],
         "require_mention": require_mention,
+        "reply_in_thread": reply_in_thread,
     })
     adapter = RoamAdapter(config)
     fake = _FakeRoamClient()
@@ -493,6 +495,39 @@ async def test_inbound_threads_roundtrip_thread_id():
     await adapter._dispatch_event(_msg_event(threadTimestamp=1699999999000000))
     event = adapter.handled_messages[0]
     assert event.source.thread_id == "1699999999000000"
+
+
+@pytest.mark.asyncio
+async def test_reply_in_thread_anchors_on_inbound_when_top_level():
+    """With reply_in_thread on, a top-level inbound gets thread_id set to
+    its own timestamp so the bot's reply creates a thread off the post.
+    """
+    adapter, _ = _make_adapter(allow_all=True, reply_in_thread=True)
+    await adapter._dispatch_event(_msg_event(timestamp=1700000000000111))
+    event = adapter.handled_messages[0]
+    assert event.source.thread_id == "1700000000000111"
+
+
+@pytest.mark.asyncio
+async def test_reply_in_thread_preserves_existing_thread():
+    """With reply_in_thread on, an already-threaded inbound keeps its
+    existing thread_id (the bot replies in the existing thread, not a
+    new one anchored on itself).
+    """
+    adapter, _ = _make_adapter(allow_all=True, reply_in_thread=True)
+    await adapter._dispatch_event(
+        _msg_event(timestamp=1700000000000111, threadTimestamp=1699999999000000)
+    )
+    event = adapter.handled_messages[0]
+    assert event.source.thread_id == "1699999999000000"
+
+
+@pytest.mark.asyncio
+async def test_reply_in_thread_off_keeps_top_level_top_level():
+    adapter, _ = _make_adapter(allow_all=True, reply_in_thread=False)
+    await adapter._dispatch_event(_msg_event(timestamp=1700000000000111))
+    event = adapter.handled_messages[0]
+    assert event.source.thread_id is None
 
 
 @pytest.mark.asyncio
