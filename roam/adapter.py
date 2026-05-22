@@ -87,33 +87,64 @@ DEDUPE_MAX_ENTRIES = 2000
 # Bot mention pattern used by Roam clients: <@uuid> or <!@uuid>.
 _BOT_MENTION_RE = re.compile(r"<!?@([0-9a-f-]+)>", re.IGNORECASE)
 
-# Fenced code-block delimiter — ``` or ~~~ with up to 3 leading spaces, per
-# the CommonMark spec.
-_FENCE_RE = re.compile(r"^\s{0,3}(```|~~~)")
+# Fenced code-block delimiter (``` or ~~~) with optional leading whitespace.
+# CommonMark itself only recognizes fences with 0–3 leading spaces, but the
+# agent often emits 4-space indented fences inside list items (the standard
+# convention for nested code in Markdown). To survive Roam's renderer, we
+# match ANY leading whitespace here so we can de-indent those fences before
+# Roam sees them.
+_FENCE_RE = re.compile(r"^(\s*)(```|~~~)")
 
 
 def expand_soft_breaks(text: str) -> str:
-    """Insert blank lines between non-empty consecutive lines outside code fences.
+    """Normalize Markdown for Roam's renderer.
 
-    Roam's Markdown renderer is CommonMark-strict, so a single newline
-    between two non-empty lines is a soft break that collapses to a space
-    at render time. The agent emits multi-line content (help tables,
-    bulleted lists, paragraphs) with single newlines and expects each
-    line to render on its own — so we forcibly upgrade single newlines
-    to paragraph breaks. Fenced code blocks are passed through unchanged
-    so command snippets render correctly.
+    Two transformations, both applied outside fenced code blocks only:
+
+    1. Insert blank lines between non-empty consecutive lines so each line
+       renders as its own paragraph. Roam treats a single newline as a soft
+       break that collapses to a space; the agent emits multi-line content
+       (help tables, bulleted lists, paragraphs) with single newlines and
+       expects each line to render on its own.
+
+    2. De-indent fenced code blocks. The agent often emits 4-space indented
+       fences inside list items (a common Markdown convention for nested
+       code). Roam's renderer mis-parses these as inline code spans rather
+       than block fences, smushing the language tag and content into one
+       line. We strip the fence's leading whitespace so it sits at column
+       0, where Roam parses it as a block fence reliably. Cost: the code
+       block stops being visually nested inside its list item, but it
+       renders as a proper code block.
     """
     if not text:
         return text
     lines = text.split("\n")
     out: List[str] = []
     in_fence = False
+    fence_indent = 0  # leading-whitespace length of the active fence opener
     for i, line in enumerate(lines):
-        out.append(line)
-        if _FENCE_RE.match(line):
+        m = _FENCE_RE.match(line)
+        if m:
+            if not in_fence:
+                fence_indent = len(m.group(1))
+                out.append(line[fence_indent:])
+            else:
+                # Closing fence — strip up to fence_indent spaces.
+                stripped = line[:fence_indent].lstrip() + line[fence_indent:]
+                out.append(stripped)
+                fence_indent = 0
             in_fence = not in_fence
             continue
-        if i + 1 >= len(lines) or in_fence:
+        if in_fence:
+            # Inside a code block: strip up to fence_indent leading spaces
+            # so content aligns with the de-indented fence.
+            if fence_indent and line[:fence_indent].strip() == "":
+                out.append(line[fence_indent:])
+            else:
+                out.append(line)
+            continue
+        out.append(line)
+        if i + 1 >= len(lines):
             continue
         if line.strip() and lines[i + 1].strip():
             out.append("")

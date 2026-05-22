@@ -224,6 +224,45 @@ def test_expand_soft_breaks_is_idempotent_on_empty():
     assert expand_soft_breaks("single line") == "single line"
 
 
+def test_expand_soft_breaks_deindents_fence_inside_list_item():
+    """The agent emits fences indented to match list-item content. Roam's
+    renderer mis-parses indented fences as inline code, so we de-indent
+    them to column 0.
+    """
+    src = "1. Run this:\n   ```bash\n   hermes setup\n   ```\n   Continue."
+    out = expand_soft_breaks(src)
+    # Fence + content + close are all at column 0
+    assert "\n```bash\nhermes setup\n```\n" in out
+
+
+def test_expand_soft_breaks_handles_four_space_indented_fence():
+    """CommonMark requires fences at 0–3 spaces of indent, but the agent
+    sometimes emits 4-space indented fences (a common Markdown style).
+    We catch them too and de-indent.
+    """
+    src = "- Item:\n    ```\n    code\n    ```"
+    out = expand_soft_breaks(src)
+    assert "\n```\ncode\n```" in out
+
+
+def test_expand_soft_breaks_preserves_relative_indent_inside_fence():
+    """Stripping the fence's leading whitespace from content lines must
+    only remove up to fence_indent spaces — extra indentation inside the
+    code (e.g., a Python function body) is preserved.
+    """
+    src = "   ```py\n   def f():\n       return 1\n   ```"
+    out = expand_soft_breaks(src)
+    # Fence + first content line de-indented by 3; the inner 4-space indent
+    # on `return` becomes 4 (was 7), preserving the relative offset.
+    assert "```py\ndef f():\n    return 1\n```" in out
+
+
+def test_expand_soft_breaks_unindented_fence_is_unchanged():
+    src = "before\n```sh\nrun\n```\nafter"
+    out = expand_soft_breaks(src)
+    assert "```sh\nrun\n```" in out
+
+
 # ---------------------------------------------------------------------------
 # Adapter fixture + fake RoamClient
 # ---------------------------------------------------------------------------
