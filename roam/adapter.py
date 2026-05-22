@@ -530,10 +530,12 @@ class RoamAdapter(BasePlatformAdapter):
         # Roam reuses the same payload across distinct envelopes.
         msg_key = f"{chat_id}:{timestamp}"
         if self._dedup_message.is_duplicate(msg_key):
+            logger.debug("roam: dropping duplicate message %s", msg_key)
             return
 
         # Self-echo filter.
         if self._bot_user_id and user_id == self._bot_user_id:
+            logger.debug("roam: dropping self-echo from bot user_id=%s", user_id)
             return
 
         # Allowlist gate.
@@ -545,9 +547,16 @@ class RoamAdapter(BasePlatformAdapter):
             )
             return
 
-        # Mention gate for groups.
+        # Mention gate for groups. Logged at INFO since this is a common
+        # source of "why didn't the bot respond?" confusion in org-bot
+        # setups with ROAM_REQUIRE_MENTION=true (the default).
         was_mentioned = _was_bot_mentioned(text, self._bot_user_id)
         if hermes_chat_type == "group" and self.require_mention and not was_mentioned:
+            logger.info(
+                "roam: dropping group message (require_mention=true, no @bot mention): "
+                "chat=%s user=%s text=%r",
+                chat_id, user_id, text[:80],
+            )
             return
 
         cleaned_text = _strip_bot_mention(text, self._bot_user_id)

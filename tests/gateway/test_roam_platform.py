@@ -467,12 +467,17 @@ async def test_inbound_self_echo_is_filtered():
 
 
 @pytest.mark.asyncio
-async def test_inbound_group_without_mention_is_silenced():
+async def test_inbound_group_without_mention_is_silenced(caplog):
+    import logging
     adapter, _ = _make_adapter(allowed_groups=["chat-1"], require_mention=True)
-    await adapter._dispatch_event(
-        _msg_event(chatType="group", text="general chatter, no ping")
-    )
+    with caplog.at_level(logging.INFO, logger="roam.adapter"):
+        await adapter._dispatch_event(
+            _msg_event(chatType="group", text="general chatter, no ping")
+        )
     assert adapter.handled_messages == []
+    # Drop should now be visible in logs so users can debug
+    # "why didn't the bot respond?" without enabling DEBUG.
+    assert any("require_mention=true" in rec.message for rec in caplog.records)
 
 
 @pytest.mark.asyncio

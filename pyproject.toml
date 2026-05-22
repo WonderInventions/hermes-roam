@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "hermes-roam"
-version = "0.0.5"
+version = "0.0.6"
 description = "Roam (ro.am) platform adapter plugin for Hermes Agent"
 requires-python = ">=3.10"
 license = { text = "MIT" }
