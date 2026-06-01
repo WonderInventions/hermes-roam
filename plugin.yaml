@@ -17,10 +17,12 @@ requires_env:
     prompt: "Roam API key"
     url: "https://ro.am/"
     password: true
+    secret: true
   - name: ROAM_WEBHOOK_SECRET
     description: "Standard-Webhooks signing secret for verifying inbound payloads (whsec_... prefix or raw base64)."
     prompt: "Roam webhook signing secret"
     password: true
+    secret: true
 optional_env:
   - name: ROAM_API_BASE_URL
     description: "Override Roam API base URL (default: https://api.ro.am/v1)."

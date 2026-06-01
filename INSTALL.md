@@ -1,11 +1,50 @@
 # Install
 
-`hermes-roam` is a Hermes Agent platform plugin. Hermes discovers
-plugins from `~/.hermes/plugins/<name>/`, so installation is two
-steps: drop the plugin into that directory, then opt in via
-`hermes plugins enable`.
+`hermes-roam` is a Hermes Agent platform plugin. The repo root **is** the
+plugin (it ships `plugin.yaml` + `__init__.py` at the top level), so Hermes can
+install it straight from its Git URL — the recommended path. Hermes discovers
+plugins from `~/.hermes/plugins/<name>/`; every method below lands the plugin in
+`~/.hermes/plugins/roam/` and then enables it.
 
-## One-liner
+## Recommended: install from Git (console or CLI)
+
+### Web dashboard
+
+In the Hermes dashboard's **Plugins** page, find **Install from GitHub / Git
+URL**, enter:
+
+```
+WonderInventions/hermes-roam
+```
+
+(or the full `https://github.com/WonderInventions/hermes-roam.git`), install,
+then **Rescan** so the sidebar picks up the new manifest, and enable it. The
+required configuration (API key, webhook secret) can be set from the dashboard.
+
+### CLI
+
+```sh
+hermes plugins install WonderInventions/hermes-roam
+```
+
+This clones the repo into `~/.hermes/plugins/roam/`, **prompts you for the
+required env vars** (`ROAM_API_KEY`, `ROAM_WEBHOOK_SECRET`) and saves them to
+`~/.hermes/.env`, then offers to enable the plugin. Add `--enable` to skip the
+prompt in scripts. To update later: `hermes plugins update roam`.
+
+## Alternatives
+
+These produce the same `~/.hermes/plugins/roam/` layout.
+
+**Manual git clone:**
+
+```sh
+git clone https://github.com/WonderInventions/hermes-roam ~/.hermes/plugins/roam \
+  && hermes plugins enable roam
+```
+
+**Release tarball one-liner** (no interactive prompt; good for scripted
+installs):
 
 ```sh
 mkdir -p ~/.hermes/plugins && \
@@ -14,26 +53,24 @@ mkdir -p ~/.hermes/plugins && \
   hermes plugins enable roam
 ```
 
-This downloads the plugin tarball attached to release `v0.0.8`,
-extracts it to `~/.hermes/plugins/roam/`, and enables it. Replace
-`v0.0.8` with whichever release tag you want from
+Replace `v0.0.8` with whichever release tag you want from
 <https://github.com/WonderInventions/hermes-roam/releases>.
 
 ## Configure
 
-Set the required env vars (typically in `~/.hermes/.env` or your
-shell):
+The two required vars are prompted by `hermes plugins install`. You can also set
+them (and the optional vars) from the dashboard, or directly in `~/.hermes/.env`
+/ your shell:
 
 ```sh
-export ROAM_API_KEY="..."          # from Roam Administration > Developer
-export ROAM_WEBHOOK_SECRET="whsec_..."   # the signing secret Roam shows you
+export ROAM_API_KEY="..."                 # from Roam Administration > Developer
+export ROAM_WEBHOOK_SECRET="whsec_..."    # the signing secret Roam shows you
 ```
 
-Optional vars (see `roam/plugin.yaml` for the full list) include
-`ROAM_WEBHOOK_PUBLIC_URL` (the public HTTPS URL Roam should call —
-required if you want the plugin to auto-subscribe webhooks),
-`ROAM_ALLOWED_USERS`, `ROAM_ALLOWED_GROUPS`, `ROAM_HOME_CHANNEL`, and
-`ROAM_REQUIRE_MENTION`.
+Optional vars (see `plugin.yaml` for the full list with descriptions) include
+`ROAM_WEBHOOK_PUBLIC_URL` (the public HTTPS URL Roam should call — required if
+you want the plugin to auto-subscribe webhooks), `ROAM_ALLOWED_USERS`,
+`ROAM_ALLOWED_GROUPS`, `ROAM_HOME_CHANNEL`, and `ROAM_REQUIRE_MENTION`.
 
 ## Verify
 
@@ -42,30 +79,17 @@ hermes plugins list | grep roam
 ```
 
 You should see `roam | enabled | 0.0.8 | Roam ... | user`. If it says
-`not enabled`, re-run `hermes plugins enable roam`.
+`not enabled`, run `hermes plugins enable roam`.
 
-Then start the gateway: `hermes gateway`. The Roam adapter will bind
-its webhook server (default `0.0.0.0:8647/roam/webhook`) and log
+Then start the gateway: `hermes gateway` (or `hermes gateway restart`). The Roam
+adapter binds its webhook server (default `0.0.0.0:8647/roam/webhook`) and logs
 `roam: webhook listening on …`.
 
 ## Upgrading
 
-Re-run the one-liner with the new tag — the tarball overwrites
-`~/.hermes/plugins/roam/`. Then restart `hermes gateway`.
+- Git installs: `hermes plugins update roam` (pulls the latest from the remote).
+- Tarball: re-run the one-liner with the new tag — it overwrites
+  `~/.hermes/plugins/roam/`.
 
-## Alternative: pip install
-
-A wheel and sdist are also attached to each release. They install the
-plugin via the `hermes_agent.plugins` entry point. **However**,
-Hermes's `plugins enable` CLI only looks at `~/.hermes/plugins/`, so
-after pip-installing you'd have to enable the plugin by editing
-`~/.hermes/config.yaml` manually:
-
-```yaml
-plugins:
-  enabled:
-    - roam
-```
-
-The tarball install above is the recommended path because it
-integrates with `hermes plugins enable`.
+Then restart the gateway: `hermes gateway restart`.
+</content>

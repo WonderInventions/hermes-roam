@@ -23,11 +23,8 @@ jobs:
           cache: pip
           cache-dependency-path: pyproject.toml
 
-      - name: Install build + test deps
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install build
-          python -m pip install -e ".[dev]"
+      - name: Install test deps
+        run: python -m pip install --upgrade pip aiohttp pytest pytest-asyncio
 
       - name: Verify tag matches pyproject version
         run: |
@@ -41,17 +38,14 @@ jobs:
       - name: Run tests against the tagged commit
         run: python -m pytest -v
 
-      - name: Build sdist and wheel
-        run: python -m build
-
       - name: Build plugin tarball
-        # Tarball extracts to ~/.hermes/plugins/roam/, matching Hermes'
-        # user-plugin discovery layout. The one-liner in INSTALL.md uses this.
-        # Placed outside dist/ so it doesn't collide with the sdist glob.
+        # The plugin files live at the repo root now; stage them under roam/ so
+        # the tarball still extracts to ~/.hermes/plugins/roam/, matching
+        # Hermes' user-plugin discovery layout (the INSTALL.md one-liner uses it).
         run: |
-          tar -czf "hermes-roam-plugin-${GITHUB_REF_NAME}.tar.gz" \
-            --exclude='__pycache__' \
-            roam
+          mkdir -p stage/roam
+          cp plugin.yaml __init__.py adapter.py roam_client.py standard_webhooks.py stage/roam/
+          tar -czf "hermes-roam-plugin-${GITHUB_REF_NAME}.tar.gz" -C stage roam
 
       - name: Create GitHub Release with artifacts
         env:
@@ -60,5 +54,4 @@ jobs:
           gh release create "$GITHUB_REF_NAME" \
             --title "$GITHUB_REF_NAME" \
             --generate-notes \
-            "hermes-roam-plugin-${GITHUB_REF_NAME}.tar.gz" \
-            dist/*.whl dist/*.tar.gz
+            "hermes-roam-plugin-${GITHUB_REF_NAME}.tar.gz"

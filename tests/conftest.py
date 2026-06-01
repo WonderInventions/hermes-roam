@@ -202,3 +202,25 @@ def _release_scoped_lock(*args, **kwargs) -> None:
 
 _gateway_status.acquire_scoped_lock = _acquire_scoped_lock
 _gateway_status.release_scoped_lock = _release_scoped_lock
+
+
+# ---------------------------------------------------------------------------
+# Load the plugin as the ``roam`` package
+# ---------------------------------------------------------------------------
+# The plugin lives at the repo root (so Hermes' Git-URL installer, which moves
+# a cloned repo to ``~/.hermes/plugins/<name>/`` and looks for plugin.yaml /
+# __init__.py at that root, recognizes it). There is no ``roam/`` subdirectory
+# to ``import roam`` anymore, so load the repo root as the ``roam`` package the
+# same way Hermes' loader does — via ``spec_from_file_location`` with
+# ``submodule_search_locations`` pointing at the root. This must run after the
+# ``gateway.*`` stubs above, because importing the adapter pulls them in.
+import importlib.util
+
+_spec = importlib.util.spec_from_file_location(
+    "roam",
+    REPO_ROOT / "__init__.py",
+    submodule_search_locations=[str(REPO_ROOT)],
+)
+_roam = importlib.util.module_from_spec(_spec)
+sys.modules["roam"] = _roam
+_spec.loader.exec_module(_roam)
