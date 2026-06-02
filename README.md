@@ -15,7 +15,7 @@ See [INSTALL.md](INSTALL.md).
 
 ```sh
 python -m venv .venv
-.venv/bin/pip install -e ".[dev]"
+.venv/bin/pip install aiohttp pytest pytest-asyncio
 .venv/bin/python -m pytest
 ```
 
@@ -25,17 +25,16 @@ plugin can be exercised without a running Hermes installation.
 ## Release process
 
 Releases are tagged commits on `master`. There is no PyPI / NPM
-registry — the GitHub Release page is the canonical distribution
-point, and users install with `pip` directly from the release tag (see
-[INSTALL.md](INSTALL.md)).
+registry — users install straight from the Git repo via
+`hermes plugins install` (see [INSTALL.md](INSTALL.md)); the GitHub
+Release page also carries a plugin tarball for scripted installs.
 
 To cut a release:
 
 1. Bump the version in three places to the same string:
    - `pyproject.toml` → `project.version`
-   - `roam/plugin.yaml` → `version`
-   - `INSTALL.md` → the `v…` references in the install one-liner and
-     wheel filename
+   - `plugin.yaml` → `version`
+   - `INSTALL.md` → the `v…` references in the tarball one-liner
 2. Commit the bump on `master` and push.
 3. Tag and push:
    ```sh
@@ -45,11 +44,10 @@ To cut a release:
 4. The `Release` GitHub Actions workflow fires on `v*` tag push and:
    - checks that the tag matches `pyproject.toml`'s `version`,
    - runs `pytest`,
-   - builds the sdist + wheel with `python -m build`,
    - builds `hermes-roam-plugin-v<version>.tar.gz` (the plugin
      tarball that the INSTALL.md one-liner extracts into
      `~/.hermes/plugins/`),
-   - creates a GitHub Release with all three artifacts attached and
+   - creates a GitHub Release with the tarball attached and
      auto-generated notes.
 
 If the tag/version check fails the workflow aborts before publishing,

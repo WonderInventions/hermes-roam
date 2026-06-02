@@ -1,6 +1,10 @@
-[build-system]
-requires = ["setuptools>=64", "wheel"]
-build-backend = "setuptools.build_meta"
+# hermes-roam is a Hermes Agent platform plugin, not a pip package. Its files
+# live at the repo root so Hermes' Git-URL installer — which clones the repo
+# into ~/.hermes/plugins/<name>/ and looks for plugin.yaml / __init__.py at that
+# root — recognizes it. There is therefore no build-system / wheel here; the
+# runtime dependency (aiohttp) is surfaced to Hermes via the adapter's
+# install_hint and documented in the README. This file is kept only for project
+# metadata (the release workflow reads project.version) and pytest config.
 
 [project]
 name = "hermes-roam"
@@ -9,37 +13,10 @@ description = "Roam (ro.am) platform adapter plugin for Hermes Agent"
 requires-python = ">=3.10"
 license = { text = "MIT" }
 authors = [{ name = "Wonder Inventions" }]
-classifiers = [
-    "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
-    "Programming Language :: Python :: 3.12",
-]
-dependencies = [
-    "aiohttp>=3.9",
-]
-
-[project.optional-dependencies]
-dev = [
-    "pytest>=8",
-    "pytest-asyncio>=0.23",
-]
 
 [project.urls]
 Homepage = "https://github.com/WonderInventions/hermes-roam"
 Issues = "https://github.com/WonderInventions/hermes-roam/issues"
-
-[project.entry-points."hermes_agent.plugins"]
-# Point at the module, not the function — Hermes' loader does
-# getattr(module, "register"), so 'roam:register' would resolve to the
-# function and the lookup would fail.
-roam = "roam"
-
-[tool.setuptools]
-packages = ["roam"]
-
-[tool.setuptools.package-data]
-roam = ["plugin.yaml"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
