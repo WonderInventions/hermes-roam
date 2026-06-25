@@ -1,0 +1,5 @@
+# Code owners for hermes-roam. Any one of these maintainers can satisfy the
+# required code-owner review on a PR (they are the current repository admins).
+# Adjust this list as the maintainer set changes; broaden it to a team handle
+# (e.g. @WonderInventions/roam-maintainers) once such a team exists.
+*       @robfig @johnhuffsmith @tdixon02 @seanmacisaac @derekcicerone

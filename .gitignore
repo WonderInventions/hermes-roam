@@ -5,3 +5,8 @@ __pycache__/
 .pytest_cache/
 build/
 dist/
+
+# Never commit local secrets (ROAM_API_KEY / ROAM_WEBHOOK_SECRET, etc.)
+.env
+.env.*
+!.env.example

@@ -56,6 +56,21 @@ mkdir -p ~/.hermes/plugins && \
 Replace `v0.0.8` with whichever release tag you want from
 <https://github.com/WonderInventions/hermes-roam/releases>.
 
+**Verify the tarball's provenance (optional but recommended).** Every release
+tarball is published from CI with signed [build provenance][prov]. Confirm it
+was built from this repo by the release workflow — not tampered with — before
+installing:
+
+```sh
+gh attestation verify hermes-roam-plugin-v0.0.8.tar.gz \
+  --repo WonderInventions/hermes-roam
+```
+
+A `✓ Verification succeeded!` line means the artifact's SLSA provenance checks
+out against GitHub's transparency log.
+
+[prov]: https://docs.github.com/actions/security-guides/using-artifact-attestations-to-establish-provenance-for-builds
+
 ## Configure
 
 The two required vars are prompted by `hermes plugins install`. You can also set

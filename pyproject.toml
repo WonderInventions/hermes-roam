@@ -16,6 +16,7 @@ authors = [{ name = "Wonder Inventions" }]
 
 [project.urls]
 Homepage = "https://github.com/WonderInventions/hermes-roam"
+Repository = "https://github.com/WonderInventions/hermes-roam"
 Issues = "https://github.com/WonderInventions/hermes-roam/issues"
 
 [tool.pytest.ini_options]
