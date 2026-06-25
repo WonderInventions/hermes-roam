@@ -18,6 +18,8 @@ message identifier on chat.update.
 from __future__ import annotations
 
 import logging
+import re
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 
@@ -31,6 +33,39 @@ DEFAULT_TIMEOUT_SECONDS = 30.0
 # snapshot. We surface a slightly lower default to leave headroom for the
 # JSON envelope overhead when callers measure in characters.
 MAX_MESSAGE_TEXT_SIZE = 8000
+
+
+def _read_plugin_version() -> str:
+    """Return this plugin's version, read from the sibling ``plugin.yaml``.
+
+    ``plugin.yaml`` is the one manifest present under both install layouts — the
+    Git-URL clone and the release tarball (which stages plugin.yaml + the ``.py``
+    files, but not pyproject.toml). Parsed with a small regex so we don't depend
+    on PyYAML, which isn't a runtime dependency. Falls back to a sentinel so a
+    missing/garbled manifest never breaks request sending.
+    """
+    manifest = Path(__file__).resolve().parent / "plugin.yaml"
+    try:
+        for line in manifest.read_text(encoding="utf-8").splitlines():
+            m = re.match(r"""version:\s*["']?([^"'\s#]+)""", line)
+            if m:
+                return m.group(1)
+    except OSError:
+        pass
+    return "0+unknown"
+
+
+PLUGIN_VERSION = _read_plugin_version()
+
+# Advertised to the Roam appserver on every request: identifies this plugin and
+# version for attribution in logs and Datadog (@plugin.name / @plugin.version).
+USER_AGENT = f"hermes-roam/{PLUGIN_VERSION}"
+
+# The Roam API version this plugin is built and tested against, pinned via the
+# ``Roam-Version`` header (and ``version`` on webhook.subscribe) so future /v1/
+# shape changes don't reach the plugin until it's bumped in lockstep with the
+# parsing code.
+ROAM_API_VERSION = "2026-06-01"
 
 
 class RoamAPIError(RuntimeError):
@@ -66,6 +101,8 @@ class RoamClient:
         return {
             "Authorization": f"Bearer {self._api_key}",
             "Content-Type": "application/json",
+            "User-Agent": USER_AGENT,
+            "Roam-Version": ROAM_API_VERSION,
         }
 
     async def _post(self, path: str, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -217,7 +254,10 @@ class RoamClient:
         return await self._post("/chat.stopStream", body)
 
     async def webhook_subscribe(self, url: str, event: str = "chat.message") -> Dict[str, Any]:
-        return await self._post("/webhook.subscribe", {"url": url, "event": event})
+        return await self._post(
+            "/webhook.subscribe",
+            {"url": url, "event": event, "version": ROAM_API_VERSION},
+        )
 
     async def webhook_unsubscribe(self, url: str, event: str = "chat.message") -> Dict[str, Any]:
         return await self._post("/webhook.unsubscribe", {"url": url, "event": event})
