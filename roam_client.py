@@ -254,13 +254,43 @@ class RoamClient:
         return await self._post("/chat.stopStream", body)
 
     async def webhook_subscribe(self, url: str, event: str = "chat.message") -> Dict[str, Any]:
+        """Subscribe ``url`` to ``event`` and return the subscription record.
+
+        The response carries the server-assigned ``id`` (a UUID) alongside the
+        event/url/filter. That ``id`` — not url+event — is what
+        :meth:`webhook_unsubscribe` keys on, so callers should retain it.
+        Re-subscribing an existing url+event is idempotent server-side and
+        returns the same record.
+        """
         return await self._post(
             "/webhook.subscribe",
             {"url": url, "event": event, "version": ROAM_API_VERSION},
         )
 
-    async def webhook_unsubscribe(self, url: str, event: str = "chat.message") -> Dict[str, Any]:
-        return await self._post("/webhook.unsubscribe", {"url": url, "event": event})
+    async def webhook_list(self) -> List[Dict[str, Any]]:
+        """Return this API key's webhook subscriptions.
+
+        ``GET /v1/webhook.list`` responds with ``{"webhooks": [{id, event,
+        url, filter, dynamic, created}, ...]}`` scoped to the calling key, and
+        requires the ``webhook:read`` scope. Useful for recovering a
+        subscription ``id`` that wasn't retained from webhook.subscribe, or for
+        sweeping up stale rows left by older clients.
+        """
+        data = await self._get("/webhook.list")
+        return list(data.get("webhooks") or [])
+
+    async def webhook_unsubscribe(self, webhook_id: str) -> None:
+        """Delete a webhook subscription by its server-assigned ``id``.
+
+        ``POST /v1/webhook.unsubscribe`` keys on the subscription ``id`` (a
+        UUID), not on url+event — passing url+event matches nothing and the
+        subscription is silently left in place. Obtain the ``id`` from the
+        webhook.subscribe response (preferred) or :meth:`webhook_list`. The
+        server returns 204 on success and 404 if the id is already gone.
+        """
+        if not webhook_id:
+            return
+        await self._post("/webhook.unsubscribe", {"id": webhook_id})
 
     async def token_info(self) -> Dict[str, Any]:
         """Fetch the bot persona identity bound to this API key."""
