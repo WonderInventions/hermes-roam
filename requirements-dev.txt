@@ -1,0 +1,8 @@
+# Pinned build/test dependencies for CI and the release pipeline.
+#
+# These never ship in the plugin tarball (that's the five source files only) —
+# pinning them makes CI runs reproducible and gives Dependabot a single place to
+# propose vetted bumps instead of CI silently pulling whatever is newest.
+aiohttp==3.14.1
+pytest==9.1.1
+pytest-asyncio==1.4.0

@@ -1,0 +1,27 @@
+version: 2
+updates:
+  # Keep the SHA-pinned GitHub Actions current. Dependabot understands SHA pins:
+  # it bumps both the SHA and the trailing "# vX.Y.Z" comment, and links the
+  # upstream changelog so the pin bump can be reviewed before it merges.
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: ci
+    groups:
+      actions:
+        patterns:
+          - "*"
+
+  # Track the pinned CI/test dependencies in requirements-dev.txt.
+  - package-ecosystem: pip
+    directory: "/"
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: deps
+    groups:
+      dev:
+        patterns:
+          - "*"
