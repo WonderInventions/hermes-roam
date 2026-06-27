@@ -275,7 +275,8 @@ class _FakeRoamClient:
         self.updates: List[Dict[str, Any]] = []
         self.typings: List[Dict[str, Any]] = []
         self.subscribes: List[Tuple[str, str]] = []
-        self.unsubscribes: List[Tuple[str, str]] = []
+        self.unsubscribes: List[str] = []
+        self.next_webhook_id: str = "wh-test-id"
         self.next_timestamp: int = 1700000000000000
         self.token_info_response: Dict[str, Any] = {
             "bot": {"id": BOT_ID, "name": "TestBot"}
@@ -310,11 +311,11 @@ class _FakeRoamClient:
 
     async def webhook_subscribe(self, url, event="chat.message"):
         self.subscribes.append((url, event))
-        return {}
+        return {"id": self.next_webhook_id, "url": url, "event": event}
 
-    async def webhook_unsubscribe(self, url, event="chat.message"):
-        self.unsubscribes.append((url, event))
-        return {}
+    async def webhook_unsubscribe(self, webhook_id):
+        self.unsubscribes.append(webhook_id)
+        return None
 
     async def token_info(self):
         return self.token_info_response
@@ -711,3 +712,34 @@ async def test_standalone_send_appends_media_hint(monkeypatch):
         _PConfig(), "chat-1", "see attached", media_files=["a.png", "b.png"]
     )
     assert "2 attachment" in fake.posts[0]["text"]
+
+
+# ---------------------------------------------------------------------------
+# Webhook subscription lifecycle (subscribe id capture + unsubscribe by id)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_disconnect_unsubscribes_by_id():
+    """disconnect() deletes the subscription using the id captured at
+    subscribe time. webhook.unsubscribe keys on the server-assigned id, not
+    on url+event, so the adapter must round-trip the id — not the URL."""
+    adapter, fake = _make_adapter()
+    adapter._subscribed_webhook_id = "wh-123"
+    adapter._subscribed_url = "https://example.com/roam/webhook"
+
+    await adapter.disconnect()
+
+    assert fake.unsubscribes == ["wh-123"]
+    assert adapter._subscribed_webhook_id is None
+    assert adapter._subscribed_url is None
+
+
+@pytest.mark.asyncio
+async def test_disconnect_without_subscription_id_is_noop():
+    """No retained id (subscribe failed, or no public_url) → no unsubscribe
+    call rather than a doomed url-based one."""
+    adapter, fake = _make_adapter()
+
+    await adapter.disconnect()
+
+    assert fake.unsubscribes == []

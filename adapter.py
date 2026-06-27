@@ -328,6 +328,10 @@ class RoamAdapter(BasePlatformAdapter):
         self._dedup_message = _Deduplicator()
         self._lock_key: Optional[str] = None
         self._subscribed_url: Optional[str] = None
+        # Server-assigned webhook id from webhook.subscribe. Retained because
+        # webhook.unsubscribe keys on this id (not url+event); without it,
+        # disconnect cannot clean up the subscription.
+        self._subscribed_webhook_id: Optional[str] = None
 
     # ------------------------------------------------------------------
     # Connection lifecycle
@@ -412,8 +416,11 @@ class RoamAdapter(BasePlatformAdapter):
         if self.public_url:
             target_url = f"{self.public_url}{self.webhook_path}"
             try:
-                await self._client.webhook_subscribe(target_url)
+                result = await self._client.webhook_subscribe(target_url)
                 self._subscribed_url = target_url
+                # Retain the server-assigned id so disconnect can unsubscribe;
+                # webhook.unsubscribe keys on the id, not on url+event.
+                self._subscribed_webhook_id = (result or {}).get("id")
                 logger.info("roam: subscribed to chat.message webhooks at %s", target_url)
             except Exception as exc:
                 logger.warning("roam: webhook.subscribe failed: %s", exc)
@@ -431,12 +438,13 @@ class RoamAdapter(BasePlatformAdapter):
     async def disconnect(self) -> None:
         self._mark_disconnected()
 
-        if self._client and self._subscribed_url:
+        if self._client and self._subscribed_webhook_id:
             try:
-                await self._client.webhook_unsubscribe(self._subscribed_url)
+                await self._client.webhook_unsubscribe(self._subscribed_webhook_id)
             except Exception as exc:
                 logger.debug("roam: webhook.unsubscribe failed: %s", exc)
-            self._subscribed_url = None
+        self._subscribed_webhook_id = None
+        self._subscribed_url = None
 
         if self._site is not None:
             try:
