@@ -1,7 +1,7 @@
 name: roam
 label: Roam
 kind: platform
-version: 0.0.9
+version: 0.0.10
 description: >
   Roam (ro.am) gateway adapter for Hermes Agent.
   Runs an aiohttp webhook server that accepts Roam chat.message webhooks
