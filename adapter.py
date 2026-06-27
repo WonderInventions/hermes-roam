@@ -618,7 +618,7 @@ class RoamAdapter(BasePlatformAdapter):
         # main channel.
         if thread_timestamp:
             thread_id = str(thread_timestamp)
-        elif self.reply_in_thread:
+        elif self.reply_in_thread and hermes_chat_type != "dm":
             thread_id = str(timestamp)
         else:
             thread_id = None

@@ -544,13 +544,32 @@ async def test_inbound_threads_roundtrip_thread_id():
 
 @pytest.mark.asyncio
 async def test_reply_in_thread_anchors_on_inbound_when_top_level():
-    """With reply_in_thread on, a top-level inbound gets thread_id set to
-    its own timestamp so the bot's reply creates a thread off the post.
+    """With reply_in_thread on, a top-level inbound in a GROUP gets thread_id
+    set to its own timestamp so the bot's reply creates a thread off the post.
+    (DMs are excluded — see test_reply_in_thread_skips_dm_top_level.)
+    """
+    adapter, _ = _make_adapter(
+        allow_all=True, reply_in_thread=True, require_mention=False
+    )
+    await adapter._dispatch_event(
+        _msg_event(timestamp=1700000000000111, chatType="group")
+    )
+    event = adapter.handled_messages[0]
+    assert event.source.thread_id == "1700000000000111"
+
+
+@pytest.mark.asyncio
+async def test_reply_in_thread_skips_dm_top_level():
+    """reply_in_thread anchors only group posts, never DMs: a top-level DM
+    stays top-level (thread_id None) even with reply_in_thread on. DMs are
+    already a private 1:1 timeline, so anchoring every message on itself would
+    fragment the conversation into one thread per message.
     """
     adapter, _ = _make_adapter(allow_all=True, reply_in_thread=True)
     await adapter._dispatch_event(_msg_event(timestamp=1700000000000111))
     event = adapter.handled_messages[0]
-    assert event.source.thread_id == "1700000000000111"
+    assert event.source.chat_type == "dm"
+    assert event.source.thread_id is None
 
 
 @pytest.mark.asyncio
