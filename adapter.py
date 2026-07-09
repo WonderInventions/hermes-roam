@@ -337,7 +337,11 @@ class RoamAdapter(BasePlatformAdapter):
     # Connection lifecycle
     # ------------------------------------------------------------------
 
-    async def connect(self) -> bool:
+    async def connect(self, *, is_reconnect: bool = False) -> bool:
+        # ``is_reconnect`` is passed by the Hermes gateway on every (re)connect
+        # since the 0.18 platform-adapter contract (matches the bundled adapters,
+        # e.g. slack). Roam's connect is idempotent — a disconnect tears down the
+        # site/subscription first — so it is accepted and does not change behavior.
         if not self.api_key or not self.webhook_secret:
             self._set_fatal_error(
                 "config_missing",
