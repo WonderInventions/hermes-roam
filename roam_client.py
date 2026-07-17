@@ -17,6 +17,7 @@ message identifier on chat.update.
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 from pathlib import Path
@@ -33,6 +34,32 @@ DEFAULT_TIMEOUT_SECONDS = 30.0
 # snapshot. We surface a slightly lower default to leave headroom for the
 # JSON envelope overhead when callers measure in characters.
 MAX_MESSAGE_TEXT_SIZE = 8000
+
+# Machine-readable catalog codes for which retrying the same request/token can
+# never succeed. ``token_revoked`` means the owner was archived/deleted or the
+# client was archived — discard the key and re-authenticate. ``invalid_token``
+# / ``not_authed`` are adjacent auth failures where spinning a reconnect loop
+# with the same credentials is pointless.
+_TERMINAL_ERROR_CODES = frozenset({
+    "token_revoked",
+    "invalid_token",
+    "not_authed",
+})
+
+# Catalog codes that may succeed on a later attempt even when the HTTP status
+# is 4xx (rate limits, temporary upstream unavailability).
+_RETRYABLE_ERROR_CODES = frozenset({
+    "ratelimited",
+    "upstream_timeout",
+    "transcript_pending",
+    "request_timeout",
+    "internal_error",
+})
+
+# Machine-readable codes are snake_case tokens (no spaces). Used to tell a v1
+# body ``{"ok":false,"error":"token_revoked"}`` (code in ``error``) from a
+# legacy v0 body ``{"error":"Token has been revoked","code":"token_revoked"}``.
+_ERROR_CODE_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 
 
 def _read_plugin_version() -> str:
@@ -65,20 +92,86 @@ USER_AGENT = f"hermes-roam/{PLUGIN_VERSION}"
 # ``Roam-Version`` header (and ``version`` on webhook.subscribe) so future /v1/
 # shape changes don't reach the plugin until it's bumped in lockstep with the
 # parsing code.
-ROAM_API_VERSION = "2026-06-01"
+#
+# ``2026-07-07`` is the common event envelope for v1 webhooks
+# (``{type, eventId, timestamp, apiVersion, data}``). Handler also accepts bare
+# baseline payloads via ``unwrap_webhook_envelope`` in adapter.py.
+ROAM_API_VERSION = "2026-07-07"
+
+
+def parse_api_error_code(body: str) -> Optional[str]:
+    """Extract the machine-readable error code from a Roam error response body.
+
+    v1 (``/v1/…``) errors are Slack-shaped::
+
+        {"ok": false, "error": "token_revoked"}
+
+    where ``error`` holds the catalog code. Legacy v0 errors keep the human
+    sentence in ``error`` and put the code in the additive ``code`` field::
+
+        {"error": "Token has been revoked", "code": "token_revoked"}
+
+    Returns ``None`` when the body is non-JSON or carries no recognizable code.
+    """
+    if not body:
+        return None
+    try:
+        data = json.loads(body)
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    code = data.get("code")
+    if isinstance(code, str) and _ERROR_CODE_RE.match(code):
+        return code
+    err = data.get("error")
+    if isinstance(err, str) and _ERROR_CODE_RE.match(err):
+        return err
+    return None
 
 
 class RoamAPIError(RuntimeError):
     """Raised when the Roam API returns a non-2xx response.
 
-    ``status`` is the HTTP status code; ``body`` is the response body
-    (truncated). Callers map common codes to user-facing messages.
+    ``status`` is the HTTP status code; ``body`` is the raw response body
+    (truncated in ``str(self)``). ``code`` is the machine-readable catalog
+    code when the body carried one (v1: the ``error`` field; v0: the
+    additive ``code`` field) — e.g. ``token_revoked``, ``msg_too_long``.
+    Callers should branch on ``code`` rather than string-matching ``body``.
     """
 
-    def __init__(self, status: int, body: str) -> None:
-        super().__init__(f"Roam API {status}: {body[:200]}")
+    def __init__(
+        self,
+        status: int,
+        body: str,
+        *,
+        code: Optional[str] = None,
+    ) -> None:
+        if code is None:
+            code = parse_api_error_code(body)
+        detail = f"{code}: {body[:200]}" if code else body[:200]
+        super().__init__(f"Roam API {status}: {detail}")
         self.status = status
         self.body = body
+        self.code = code
+
+    @property
+    def terminal(self) -> bool:
+        """True when retrying with the same credentials can never succeed.
+
+        ``token_revoked`` (and adjacent auth codes) must stop any reconnect /
+        send retry loop — the client has to discard the key.
+        """
+        return bool(self.code and self.code in _TERMINAL_ERROR_CODES)
+
+    @property
+    def retryable(self) -> bool:
+        """Whether a later attempt with the same request/token may succeed."""
+        if self.terminal:
+            return False
+        if self.code and self.code in _RETRYABLE_ERROR_CODES:
+            return True
+        return self.status >= 500
 
 
 class RoamClient:
@@ -118,6 +211,10 @@ class RoamClient:
                 if not text:
                     return {}
                 try:
+                    # v1 success bodies may carry a top-level ``ok: true``
+                    # envelope field alongside the resource fields; callers
+                    # read named keys (timestamp, id, …) so the extra field is
+                    # harmless and must not be stripped.
                     return await resp.json(content_type=None)
                 except Exception:
                     # The server returned a non-JSON 2xx — surface as empty dict
@@ -137,6 +234,7 @@ class RoamClient:
                 if not text:
                     return {}
                 try:
+                    # Tolerate ``ok: true`` on success (see _post).
                     return await resp.json(content_type=None)
                 except Exception:
                     return {}
