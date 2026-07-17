@@ -229,6 +229,37 @@ def _chat_type_to_hermes(roam_chat_type: str) -> str:
     return "group"
 
 
+def unwrap_webhook_envelope(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Return the event payload, unwrapping the 2026-07-07+ common envelope.
+
+    Envelope shape (detect via ``apiVersion`` + object ``data``)::
+
+        {
+          "type": "chat.message",
+          "eventId": "…",
+          "timestamp": "2026-07-07T…Z",
+          "apiVersion": "2026-07-07",
+          "data": { …event fields… }
+        }
+
+    Bare baseline payloads (no ``apiVersion`` / ``data``) pass through.
+    For ``chat.message``, restore the legacy ``type: "message"`` discriminator
+    when the envelope carries the full event name and ``data`` omits it.
+    """
+    if not isinstance(payload, dict):
+        return payload
+    api_version = payload.get("apiVersion")
+    data = payload.get("data")
+    if not isinstance(api_version, str) or not api_version:
+        return payload
+    if not isinstance(data, dict):
+        return payload
+    out = dict(data)
+    if payload.get("type") == "chat.message" and "type" not in out:
+        out["type"] = "message"
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Adapter
 # ---------------------------------------------------------------------------
@@ -555,9 +586,42 @@ class RoamAdapter(BasePlatformAdapter):
             logger.exception("roam: dispatch_event failed")
 
     async def _dispatch_event(self, event: Dict[str, Any]) -> None:
+        # Accept bare baseline bodies and 2026-07-07+ envelopes (apiVersion + data).
+        event = unwrap_webhook_envelope(event)
+
         if event.get("type") != "message":
             logger.debug("roam: ignoring event type %r", event.get("type"))
             return
+
+        # v1 ``chat.message`` webhooks fire for create, edit, and delete of the
+        # same message identity (stable chatId+timestamp). Discriminators:
+        #   - new message: version == 1 (or absent on older payloads)
+        #   - edit:        version > 1 with content present
+        #   - delete:      contentType == "deleted" (version bumped again)
+        # Hermes only answers new messages — replaying an edit would re-invoke
+        # the agent on the same identity, and deletes carry no content.
+        content_type = event.get("contentType") or ""
+        if content_type == "deleted":
+            logger.debug(
+                "roam: ignoring deleted message chatId=%s timestamp=%s version=%s",
+                event.get("chatId"),
+                event.get("timestamp"),
+                event.get("version"),
+            )
+            return
+        version = event.get("version")
+        if version is not None:
+            try:
+                if int(version) > 1:
+                    logger.debug(
+                        "roam: ignoring edited message chatId=%s timestamp=%s version=%s",
+                        event.get("chatId"),
+                        event.get("timestamp"),
+                        version,
+                    )
+                    return
+            except (TypeError, ValueError):
+                pass
 
         chat_id = event.get("chatId") or ""
         user_id = event.get("userId") or ""
@@ -687,9 +751,13 @@ class RoamAdapter(BasePlatformAdapter):
     ) -> None:
         """Download item URLs into Hermes' media cache.
 
-        Roam webhook items carry a public ``url`` field. We fetch the bytes
-        with the bot's API key and stash them in the local cache so the
-        agent's vision tools can read them as file paths.
+        Roam webhook items carry a signed public ``url`` when the underlying
+        asset is ready (the appserver polls briefly at delivery so most
+        payloads include it even for freshly-sent attachments). We fetch the
+        bytes and stash them in the local cache so the agent's vision tools
+        can read them as file paths. Items still missing ``url`` (never-ready
+        asset after the delivery poll) are skipped — there is no other handle
+        on the content without a chat.history re-fetch, which we don't do.
         """
         import aiohttp
 
@@ -699,8 +767,20 @@ class RoamAdapter(BasePlatformAdapter):
                 url = item.get("url")
                 mime = item.get("mime") or "application/octet-stream"
                 if not url:
+                    # Metadata-only item (ingest still pending or failed).
+                    # The server now populates url before most deliveries;
+                    # when it's still absent we have nothing to fetch.
+                    if item.get("assetId") or item.get("type"):
+                        logger.debug(
+                            "roam: item missing url (assetId=%s type=%s); skipping media fetch",
+                            item.get("assetId"),
+                            item.get("type"),
+                        )
                     continue
                 try:
+                    # Signed CDN URLs are typically auth-free; the Bearer is
+                    # harmlessly ignored by the asset CDN and keeps working if
+                    # a future origin ever requires it.
                     async with session.get(
                         url, headers={"Authorization": f"Bearer {self.api_key}"}
                     ) as resp:
@@ -735,6 +815,22 @@ class RoamAdapter(BasePlatformAdapter):
     # Outbound — send / edit / typing
     # ------------------------------------------------------------------
 
+    def _note_api_error(self, exc: RoamAPIError) -> None:
+        """Mark terminal auth failures so the gateway stops retry loops.
+
+        ``token_revoked`` (and adjacent invalid-token codes) mean the configured
+        API key can never work again — surface a non-retryable fatal error
+        rather than letting reconnect/send spin forever.
+        """
+        if not exc.terminal:
+            return
+        code = exc.code or "auth_failed"
+        self._set_fatal_error(
+            code,
+            f"Roam API key is unusable ({code}); update ROAM_API_KEY and restart",
+            retryable=False,
+        )
+
     async def send(
         self,
         chat_id: str,
@@ -761,10 +857,11 @@ class RoamAdapter(BasePlatformAdapter):
                 reply_to=reply_ts,
             )
         except RoamAPIError as exc:
+            self._note_api_error(exc)
             return SendResult(
                 success=False,
                 error=str(exc),
-                retryable=exc.status >= 500,
+                retryable=exc.retryable,
             )
         except Exception as exc:
             logger.exception("roam: chat.post failed")
@@ -799,10 +896,11 @@ class RoamAdapter(BasePlatformAdapter):
                 text=expand_soft_breaks(content),
             )
         except RoamAPIError as exc:
+            self._note_api_error(exc)
             return SendResult(
                 success=False,
                 error=str(exc),
-                retryable=exc.status >= 500,
+                retryable=exc.retryable,
             )
         except Exception as exc:
             logger.exception("roam: chat.update failed")

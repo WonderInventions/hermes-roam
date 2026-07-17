@@ -18,6 +18,7 @@ from roam.adapter import (
     _thread_ts_from_metadata,
     _was_bot_mentioned,
     expand_soft_breaks,
+    unwrap_webhook_envelope,
 )
 from roam.roam_client import RoamAPIError
 from roam.standard_webhooks import verify_signature
@@ -425,6 +426,32 @@ async def test_send_surfaces_api_error():
 
 
 @pytest.mark.asyncio
+async def test_send_token_revoked_is_terminal_and_fatal():
+    """token_revoked must not be retried — flag a fatal non-retryable error."""
+    adapter, fake = _make_adapter()
+    fake.fail_post_with = RoamAPIError(
+        401, '{"ok":false,"error":"token_revoked"}'
+    )
+    result = await adapter.send("chat-1", "hello")
+    assert result.success is False
+    assert result.retryable is False
+    assert "token_revoked" in (result.error or "")
+    assert adapter._fatal_error is not None
+    assert adapter._fatal_error["code"] == "token_revoked"
+    assert adapter._fatal_error["retryable"] is False
+
+
+@pytest.mark.asyncio
+async def test_send_5xx_is_retryable_without_fatal():
+    adapter, fake = _make_adapter()
+    fake.fail_post_with = RoamAPIError(503, "temporary")
+    result = await adapter.send("chat-1", "hello")
+    assert result.success is False
+    assert result.retryable is True
+    assert adapter._fatal_error is None
+
+
+@pytest.mark.asyncio
 async def test_edit_message_calls_chat_update():
     adapter, fake = _make_adapter()
     result = await adapter.edit_message("chat-1", "1700000000000000", "edited")
@@ -468,6 +495,7 @@ async def test_create_handoff_thread_returns_timestamp_string():
 def _msg_event(**overrides) -> Dict[str, Any]:
     base = {
         "type": "message",
+        "version": 1,
         "contentType": "text",
         "userId": OTHER_ID,
         "chatId": "chat-1",
@@ -615,6 +643,214 @@ async def test_inbound_drops_non_message_events():
     adapter, _ = _make_adapter(allow_all=True)
     await adapter._dispatch_event({"type": "chat.reaction", "chatId": "x"})
     assert adapter.handled_messages == []
+
+
+def test_unwrap_webhook_envelope_bare_passthrough():
+    bare = _msg_event()
+    assert unwrap_webhook_envelope(bare) is bare or unwrap_webhook_envelope(bare) == bare
+    assert unwrap_webhook_envelope(bare)["type"] == "message"
+
+
+def test_unwrap_webhook_envelope_2026_07_07():
+    """apiVersion + data marks the common event envelope; restore type: message."""
+    inner = _msg_event(chatId="chat-env", text="from envelope")
+    del inner["type"]  # envelope data may omit the legacy discriminator
+    enveloped = {
+        "type": "chat.message",
+        "eventId": "0197f9a1-7d2e-7cc3-9f6a-8b1c2d3e4f5a",
+        "timestamp": "2026-07-07T18:23:45.123456Z",
+        "apiVersion": "2026-07-07",
+        "data": inner,
+    }
+    out = unwrap_webhook_envelope(enveloped)
+    assert out["type"] == "message"
+    assert out["chatId"] == "chat-env"
+    assert out["text"] == "from envelope"
+
+
+@pytest.mark.asyncio
+async def test_inbound_handles_enveloped_chat_message():
+    adapter, _ = _make_adapter(allow_all=True)
+    inner = _msg_event(text="envelope hello")
+    del inner["type"]
+    await adapter._dispatch_event(
+        {
+            "type": "chat.message",
+            "eventId": "evt-1",
+            "timestamp": "2026-07-07T18:00:00Z",
+            "apiVersion": "2026-07-07",
+            "data": inner,
+        }
+    )
+    assert len(adapter.handled_messages) == 1
+    assert adapter.handled_messages[0].text == "envelope hello"
+
+
+@pytest.mark.asyncio
+async def test_inbound_ignores_enveloped_edits():
+    adapter, _ = _make_adapter(allow_all=True)
+    await adapter._dispatch_event(
+        {
+            "type": "chat.message",
+            "eventId": "evt-2",
+            "timestamp": "2026-07-07T18:00:00Z",
+            "apiVersion": "2026-07-07",
+            "data": _msg_event(version=2, text="edited"),
+        }
+    )
+    assert adapter.handled_messages == []
+
+
+@pytest.mark.asyncio
+async def test_inbound_ignores_edited_message(caplog):
+    """v1 chat.message fires for edits (version > 1). Do not re-invoke the agent."""
+    import logging
+
+    adapter, _ = _make_adapter(allow_all=True)
+    with caplog.at_level(logging.DEBUG, logger="roam.adapter"):
+        await adapter._dispatch_event(
+            _msg_event(version=2, text="edited content")
+        )
+    assert adapter.handled_messages == []
+    assert any("ignoring edited message" in rec.message for rec in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_inbound_ignores_deleted_message(caplog):
+    """v1 chat.message fires for deletes (contentType=deleted). Ignore them."""
+    import logging
+
+    adapter, _ = _make_adapter(allow_all=True)
+    with caplog.at_level(logging.DEBUG, logger="roam.adapter"):
+        await adapter._dispatch_event(
+            _msg_event(version=3, contentType="deleted", text="")
+        )
+    assert adapter.handled_messages == []
+    assert any("ignoring deleted message" in rec.message for rec in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_inbound_accepts_version_1_create():
+    adapter, _ = _make_adapter(allow_all=True)
+    await adapter._dispatch_event(_msg_event(version=1))
+    assert len(adapter.handled_messages) == 1
+
+
+@pytest.mark.asyncio
+async def test_inbound_accepts_missing_version_as_create():
+    """Older/test payloads without version still process as creates."""
+    adapter, _ = _make_adapter(allow_all=True)
+    event = _msg_event()
+    del event["version"]
+    await adapter._dispatch_event(event)
+    assert len(adapter.handled_messages) == 1
+
+
+# ---------------------------------------------------------------------------
+# Inbound media (attachment url population)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_collect_media_downloads_when_url_present(monkeypatch):
+    """When the webhook item carries a signed url (the common case after the
+    appserver's ingest poll), fetch and cache the bytes for the vision path.
+    """
+    adapter, _ = _make_adapter()
+
+    class _Resp:
+        status = 200
+
+        async def read(self):
+            return b"fake-image-bytes"
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+    class _Session:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+        def get(self, url, headers=None):
+            assert url == "https://assets-cdn.example/content?sig=1"
+            return _Resp()
+
+    monkeypatch.setattr("aiohttp.ClientSession", _Session)
+
+    media_urls: List[str] = []
+    media_types: List[str] = []
+    await adapter._collect_media(
+        [{
+            "type": "photo",
+            "mime": "image/png",
+            "name": "image.png",
+            "url": "https://assets-cdn.example/content?sig=1",
+            "assetId": "asset-1",
+        }],
+        media_urls,
+        media_types,
+    )
+    assert len(media_urls) == 1
+    assert media_types == ["image/png"]
+    # cache_image_from_bytes wrote a real tempfile; clean up.
+    from pathlib import Path
+    Path(media_urls[0]).unlink(missing_ok=True)
+
+
+@pytest.mark.asyncio
+async def test_collect_media_skips_items_without_url():
+    """Metadata-only items (url still empty after ingest poll) are skipped."""
+    adapter, _ = _make_adapter()
+    media_urls: List[str] = []
+    media_types: List[str] = []
+    await adapter._collect_media(
+        [{
+            "type": "photo",
+            "mime": "image/png",
+            "name": "image.png",
+            "assetId": "asset-still-ingesting",
+        }],
+        media_urls,
+        media_types,
+    )
+    assert media_urls == []
+    assert media_types == []
+
+
+@pytest.mark.asyncio
+async def test_inbound_with_media_url_sets_photo_type(monkeypatch):
+    adapter, _ = _make_adapter(allow_all=True)
+
+    async def _fake_collect(items, media_urls, media_types):
+        media_urls.append("/tmp/cached.png")
+        media_types.append("image/png")
+
+    adapter._collect_media = _fake_collect  # type: ignore[method-assign]
+    await adapter._dispatch_event(
+        _msg_event(
+            text="",
+            items=[{
+                "type": "photo",
+                "mime": "image/png",
+                "url": "https://assets-cdn.example/x",
+                "assetId": "a1",
+            }],
+        )
+    )
+    assert len(adapter.handled_messages) == 1
+    event = adapter.handled_messages[0]
+    assert event.media_urls == ["/tmp/cached.png"]
+    assert event.media_types == ["image/png"]
+    from gateway.platforms.base import MessageType
+    assert event.message_type == MessageType.PHOTO
 
 
 # ---------------------------------------------------------------------------
