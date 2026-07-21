@@ -109,6 +109,52 @@ def test_verify_signature_accepts_raw_secret_without_prefix():
     assert verify_signature(raw_secret, headers, body) is True
 
 
+class _WebhookRequest:
+    def __init__(self, body: bytes, headers: Dict[str, str]):
+        self._body = body
+        self.headers = headers
+
+    async def read(self) -> bytes:
+        return self._body
+
+
+@pytest.mark.asyncio
+async def test_webhook_handler_echoes_valid_signed_verification():
+    import json
+
+    adapter, _ = _make_adapter()
+    body = json.dumps({
+        "type": "webhook.verification",
+        "eventId": "evt-verify",
+        "timestamp": "2026-07-20T12:00:00Z",
+        "apiVersion": "2026-07-07",
+        "data": {"challenge": "challenge-token", "event": "chat.message"},
+    }).encode("utf-8")
+    msg_id = "msg_verify"
+    ts = int(time.time())
+    response = await adapter._handle_webhook(_WebhookRequest(body, {
+        "webhook-id": msg_id,
+        "webhook-timestamp": str(ts),
+        "webhook-signature": _sign(msg_id, ts, body),
+    }))
+
+    assert response.status == 200
+    assert json.loads(response.body) == {"challenge": "challenge-token"}
+    assert len(adapter._dedup_webhook_id._seen) == 0
+
+
+@pytest.mark.asyncio
+async def test_webhook_handler_rejects_invalid_verification_signature():
+    body = b'{"type":"webhook.verification","data":{"challenge":"token"}}'
+    response = await _make_adapter()[0]._handle_webhook(_WebhookRequest(body, {
+        "webhook-id": "msg_verify",
+        "webhook-timestamp": str(int(time.time())),
+        "webhook-signature": "v1,invalid",
+    }))
+
+    assert response.status == 401
+
+
 # ---------------------------------------------------------------------------
 # Mention parsing
 # ---------------------------------------------------------------------------

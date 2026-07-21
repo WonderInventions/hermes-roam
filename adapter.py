@@ -568,6 +568,15 @@ class RoamAdapter(BasePlatformAdapter):
         except (UnicodeDecodeError, ValueError):
             return web.Response(status=400, text="bad json")
 
+        # Roam signs subscribe-time verification deliveries exactly like normal
+        # webhooks. Echo the challenge synchronously before dedupe or dispatch.
+        if payload.get("type") == "webhook.verification":
+            data = payload.get("data")
+            challenge = data.get("challenge") if isinstance(data, dict) else None
+            if not isinstance(challenge, str):
+                return web.Response(status=400, text="bad verification challenge")
+            return web.json_response({"challenge": challenge})
+
         # Dedupe on webhook-id first — covers Standard-Webhooks redeliveries.
         webhook_id = request.headers.get("webhook-id") or ""
         if webhook_id and self._dedup_webhook_id.is_duplicate(webhook_id):
