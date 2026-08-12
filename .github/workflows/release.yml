@@ -21,12 +21,12 @@ jobs:
       # Actions are pinned to full commit SHAs (mutable tags like @v4 can be
       # re-pointed at malicious code). The trailing comment tracks the human
       # version; Dependabot bumps the SHA and the comment together.
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false  # don't leave the checkout token on disk
 
       - name: Set up Python
-        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
           cache: pip
@@ -64,7 +64,7 @@ jobs:
         # Signs SLSA provenance linking this exact tarball to this repo, commit,
         # and workflow run. Consumers verify with:
         #   gh attestation verify <tarball> --repo WonderInventions/hermes-roam
-        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: "hermes-roam-plugin-${{ github.ref_name }}.tar.gz"
 
